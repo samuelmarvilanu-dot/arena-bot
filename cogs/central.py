@@ -2079,6 +2079,47 @@ class Central(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type != discord.InteractionType.component:
+            return
+        cid = interaction.data.get("custom_id", "")
+        if not cid.startswith("STREAMER|"):
+            return
+        acao = cid.split("|")[1]
+        data = db.load(interaction.guild.id)
+        uid = str(interaction.user.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if uid not in data["streamers"]: data["streamers"][uid] = {}
+
+        if acao == "configurar":
+            streamer = data["streamers"].get(uid, {})
+            embed = discord.Embed(title="Streamer - " + interaction.user.display_name, color=0x5865F2)
+            embed.description = "Fila: " + ("LIGADA" if streamer.get("ativo") else "DESLIGADA")
+            embed.add_field(name="Sua Descricao/Regras", value=streamer.get("regras", "Nao definido."), inline=False)
+            embed.add_field(name="Nome do Canal", value=streamer.get("nome_canal", "#contra - [[nome_streamer]]"), inline=False)
+            embed.add_field(name="Link da Live", value=streamer.get("link", "Nenhum"), inline=False)
+            embed.add_field(name="Jogo Selecionado", value=streamer.get("jogo", "Nenhum"), inline=False)
+            await interaction.response.send_message(embed=embed, view=ViewStreamerConfig(uid), ephemeral=True)
+        elif acao == "regras":
+            await interaction.response.send_modal(ModalStreamerRegras(uid))
+        elif acao == "nome":
+            await interaction.response.send_modal(ModalStreamerNome(uid))
+        elif acao == "link":
+            await interaction.response.send_modal(ModalStreamerLink(uid))
+        elif acao == "filas":
+            atual = data["streamers"][uid].get("ativo", False)
+            data["streamers"][uid]["ativo"] = not atual
+            db.save(interaction.guild.id, data)
+            await interaction.response.send_message("Filas: " + ("LIGADAS" if not atual else "DESLIGADAS"), ephemeral=True)
+        elif acao == "modo":
+            modos = ["Basico", "Avancado"]
+            atual = data["streamers"][uid].get("modo", "Basico")
+            novo = modos[(modos.index(atual)+1) % len(modos)] if atual in modos else "Basico"
+            data["streamers"][uid]["modo"] = novo
+            db.save(interaction.guild.id, data)
+            await interaction.response.send_message("Modo: " + novo, ephemeral=True)
+
     @app_commands.command(name="central", description="[ADMIN] Central de controle do bot")
     async def central(self, interaction: discord.Interaction):
         embed = embed_central(interaction.guild)
@@ -2097,6 +2138,86 @@ class Central(commands.Cog):
         cod["usos_atual"] += 1
         db.save(interaction.guild.id, data)
         await interaction.response.send_message("Resgatado! Recompensa: " + cod["item"], ephemeral=True)
+
+
+
+class ModalStreamerRegras(discord.ui.Modal, title="Editar Regras"):
+    regras = discord.ui.TextInput(label="Descricao/Regras", style=discord.TextStyle.paragraph, max_length=500)
+    def __init__(self, uid):
+        super().__init__()
+        self.uid = uid
+    async def on_submit(self, interaction):
+        data = db.load(interaction.guild.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
+        data["streamers"][self.uid]["regras"] = self.regras.value
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Regras atualizadas!", ephemeral=True)
+
+class ModalStreamerNome(discord.ui.Modal, title="Editar Nome do Canal"):
+    nome = discord.ui.TextInput(label="Nome do Canal", placeholder="ex: contra - [[nome_streamer]]", max_length=50)
+    def __init__(self, uid):
+        super().__init__()
+        self.uid = uid
+    async def on_submit(self, interaction):
+        data = db.load(interaction.guild.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
+        data["streamers"][self.uid]["nome_canal"] = self.nome.value
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Nome atualizado!", ephemeral=True)
+
+class ModalStreamerLink(discord.ui.Modal, title="Editar Link da Live"):
+    link = discord.ui.TextInput(label="Link da Live", placeholder="ex: twitch.tv/seucanal", max_length=100)
+    def __init__(self, uid):
+        super().__init__()
+        self.uid = uid
+    async def on_submit(self, interaction):
+        data = db.load(interaction.guild.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
+        data["streamers"][self.uid]["link"] = self.link.value
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Link atualizado!", ephemeral=True)
+
+class ViewStreamerConfig(discord.ui.View):
+    def __init__(self, uid):
+        super().__init__(timeout=300)
+        self.uid = uid
+
+    @discord.ui.button(label="Editar Regras", style=discord.ButtonStyle.grey, row=0)
+    async def regras(self, interaction, button):
+        await interaction.response.send_modal(ModalStreamerRegras(self.uid))
+
+    @discord.ui.button(label="Editar Nome", style=discord.ButtonStyle.grey, row=0)
+    async def nome(self, interaction, button):
+        await interaction.response.send_modal(ModalStreamerNome(self.uid))
+
+    @discord.ui.button(label="Editar Link", style=discord.ButtonStyle.grey, row=1)
+    async def link(self, interaction, button):
+        await interaction.response.send_modal(ModalStreamerLink(self.uid))
+
+    @discord.ui.button(label="Filas: Desligadas", style=discord.ButtonStyle.grey, row=2)
+    async def filas(self, interaction, button):
+        data = db.load(interaction.guild.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
+        atual = data["streamers"][self.uid].get("ativo", False)
+        data["streamers"][self.uid]["ativo"] = not atual
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Filas: " + ("LIGADAS" if not atual else "DESLIGADAS"), ephemeral=True)
+
+    @discord.ui.button(label="Modo Stream: Basico", style=discord.ButtonStyle.grey, row=2)
+    async def modo(self, interaction, button):
+        data = db.load(interaction.guild.id)
+        if "streamers" not in data: data["streamers"] = {}
+        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
+        modos = ["Basico", "Avancado"]
+        atual = data["streamers"][self.uid].get("modo", "Basico")
+        novo = modos[(modos.index(atual)+1) % len(modos)] if atual in modos else "Basico"
+        data["streamers"][self.uid]["modo"] = novo
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Modo: " + novo, ephemeral=True)
 
 
 async def setup(bot):
