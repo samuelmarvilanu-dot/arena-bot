@@ -102,9 +102,7 @@ async def postar_painel_andamento(canal, partida, guild, config):
             qr_file = gerar_qrcode(pix_med, cor)
             if qr_file:
                 await canal.send(file=qr_file)
-            await canal.send(pix_med)
-            # Valor a pagar
-            await canal.send("```\nValor a ser pago:\nR$ " + str(round(taxa, 2)) + "\n```")
+            await canal.send("`" + pix_med + "`")
 
 
 # ══════════════════════════════════════════════════════════
