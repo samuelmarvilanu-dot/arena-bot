@@ -1846,4 +1846,58 @@ class ViewBot(discord.ui.View):
         else:
             await interaction.response.defer()
 
-    @discord.ui.butto
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.grey, row=1)
+    async def voltar(self, interaction, button):
+        embed = embed_central(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=ViewCentral())
+
+
+class ViewConfirmarReset(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="Confirmar Reset", style=discord.ButtonStyle.red, row=0)
+    async def confirmar(self, interaction, button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Apenas administradores podem resetar.", ephemeral=True)
+            return
+        import os
+        path = "data/" + str(interaction.guild.id) + ".json"
+        if os.path.exists(path):
+            os.remove(path)
+        await interaction.response.send_message("Bot resetado!", ephemeral=True)
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.grey, row=0)
+    async def cancelar(self, interaction, button):
+        embed = embed_central(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=ViewCentral())
+
+
+# COG
+class Central(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="central", description="[ADMIN] Central de controle do bot")
+    async def central(self, interaction: discord.Interaction):
+        embed = embed_central(interaction.guild)
+        await interaction.response.send_message(embed=embed, view=ViewCentral(), ephemeral=True)
+
+    @app_commands.command(name="codiguin", description="Resgata um codiguin")
+    async def resgatar_codiguin(self, interaction: discord.Interaction, codigo: str):
+        data = db.load(interaction.guild.id)
+        cod = data.get("codiguins", {}).get(codigo.upper())
+        if not cod or not cod.get("ativo"):
+            await interaction.response.send_message("Codigo invalido.", ephemeral=True)
+            return
+        if cod["usos_max"] > 0 and cod["usos_atual"] >= cod["usos_max"]:
+            await interaction.response.send_message("Codigo esgotado.", ephemeral=True)
+            return
+        cod["usos_atual"] += 1
+        db.save(interaction.guild.id, data)
+        await interaction.response.send_message("Resgatado! Recompensa: " + cod["item"], ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(Central(bot))
