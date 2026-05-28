@@ -1782,7 +1782,16 @@ class ViewStreamers(discord.ui.View):
         data = db.load(interaction.guild.id)
         data["config"]["canal_streamer_liveon"] = canal_id
         db.save(interaction.guild.id, data)
-        await interaction.response.send_message("✅ Canal Live On configurado!", ephemeral=True)
+        await interaction.response.send_message("Canal Live On configurado!", ephemeral=True)
+
+    @discord.ui.button(label="Desligada", style=discord.ButtonStyle.red, row=4)
+    async def toggle_med(self, interaction, button):
+        data = db.load(interaction.guild.id)
+        atual = data["config"].get("streamer_med_solo", False)
+        data["config"]["streamer_med_solo"] = not atual
+        db.save(interaction.guild.id, data)
+        status = "SIM" if not atual else "NAO"
+        await interaction.response.send_message("Streamer pode selecionar mediador: " + status, ephemeral=True)
 
     @discord.ui.button(label="Voltar", style=discord.ButtonStyle.grey, row=4)
     async def voltar(self, interaction, button):
