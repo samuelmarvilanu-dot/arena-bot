@@ -1743,63 +1743,78 @@ class ViewStreamers(discord.ui.View):
         sel_cargo = discord.ui.RoleSelect(placeholder="Selecione o Cargo Streamer", row=1)
         sel_painel = discord.ui.ChannelSelect(placeholder="Selecione o Canal do Painel", channel_types=[discord.ChannelType.text], row=2)
         sel_liveon = discord.ui.ChannelSelect(placeholder="Selecione o Canal de LiveOn", channel_types=[discord.ChannelType.text], row=3)
-        sel_cat.callback = self._set_cat
-        sel_cargo.callback = self._set_cargo
-        sel_painel.callback = self._set_painel
-        sel_liveon.callback = self._set_liveon
+        sel_cat.callback = self._cat
+        sel_cargo.callback = self._cargo
+        sel_painel.callback = self._painel
+        sel_liveon.callback = self._liveon
         self.add_item(sel_cat)
         self.add_item(sel_cargo)
         self.add_item(sel_painel)
         self.add_item(sel_liveon)
 
-    async def _set_cat(self, interaction):
-        v = interaction.data["values"][0]
-        canal_id = int(v) if isinstance(v, str) else v.id
-        data = db.load(interaction.guild.id)
-        data["config"]["streamer_categoria_id"] = canal_id
-        db.save(interaction.guild.id, data)
-        await interaction.response.send_message("✅ Categoria de streamers configurada!", ephemeral=True)
+    async def _cat(self, interaction):
+        v=interaction.data["values"][0]
+        canal_id=int(v) if isinstance(v,str) else v.id
+        data=db.load(interaction.guild.id)
+        data["config"]["streamer_categoria_id"]=canal_id
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Categoria configurada!", ephemeral=True)
 
-    async def _set_cargo(self, interaction):
-        v = interaction.data["values"][0]
-        cargo_id = int(v) if isinstance(v, str) else v.id
-        data = db.load(interaction.guild.id)
-        data["config"]["cargo_streamer"] = cargo_id
-        db.save(interaction.guild.id, data)
-        await interaction.response.send_message("✅ Cargo streamer configurado!", ephemeral=True)
+    async def _cargo(self, interaction):
+        v=interaction.data["values"][0]
+        cargo_id=int(v) if isinstance(v,str) else v.id
+        data=db.load(interaction.guild.id)
+        data["config"]["cargo_streamer"]=cargo_id
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Cargo streamer configurado!", ephemeral=True)
 
-    async def _set_painel(self, interaction):
-        v = interaction.data["values"][0]
-        canal_id = int(v) if isinstance(v, str) else v.id
-        data = db.load(interaction.guild.id)
-        data["config"]["canal_streamer_painel"] = canal_id
-        db.save(interaction.guild.id, data)
-        await interaction.response.send_message("✅ Canal do painel streamer configurado!", ephemeral=True)
+    async def _painel(self, interaction):
+        v=interaction.data["values"][0]
+        canal_id=int(v) if isinstance(v,str) else v.id
+        data=db.load(interaction.guild.id)
+        data["config"]["canal_streamer_painel"]=canal_id
+        db.save(interaction.guild.id,data)
+        canal=interaction.guild.get_channel(canal_id)
+        if canal:
+            embed1=discord.Embed(title="Painel do Streamer",description="Bem-vindo(a) ao painel do Streamer.\nAqui voce pode configurar tudo o que precisa para suas lives.",color=0x5865F2)
+            embed2=discord.Embed(title="Streamer - "+interaction.guild.name,description="Configura tudo pelo painel abaixo.",color=0x5865F2)
+            embed2.add_field(name="Sua Descricao/Regras",value="Nao definido.",inline=False)
+            embed2.add_field(name="Nome do Canal",value="#contra - [[nome_streamer]]",inline=False)
+            embed2.add_field(name="Link da Live",value="Nenhum",inline=False)
+            embed2.add_field(name="Jogo Selecionado",value="Nenhum",inline=False)
+            v1=discord.ui.View(timeout=None)
+            v1.add_item(discord.ui.Button(label="Configurar",style=discord.ButtonStyle.grey,custom_id="STREAMER|configurar"))
+            v2=discord.ui.View(timeout=None)
+            v2.add_item(discord.ui.Button(label="Editar Regras",style=discord.ButtonStyle.grey,custom_id="STREAMER|regras",row=0))
+            v2.add_item(discord.ui.Button(label="Editar Nome",style=discord.ButtonStyle.grey,custom_id="STREAMER|nome",row=0))
+            v2.add_item(discord.ui.Button(label="Editar Link",style=discord.ButtonStyle.grey,custom_id="STREAMER|link",row=1))
+            v2.add_item(discord.ui.Button(label="Filas: Desligadas",style=discord.ButtonStyle.grey,custom_id="STREAMER|filas",row=2))
+            v2.add_item(discord.ui.Button(label="Modo Stream: Basico",style=discord.ButtonStyle.grey,custom_id="STREAMER|modo",row=2))
+            await canal.send(embed=embed1,view=v1)
+            await canal.send(embed=embed2,view=v2)
+            await interaction.response.send_message("Canal do painel configurado e painel postado!", ephemeral=True)
+        else:
+            await interaction.response.send_message("Canal nao encontrado.", ephemeral=True)
 
-    async def _set_liveon(self, interaction):
-        v = interaction.data["values"][0]
-        canal_id = int(v) if isinstance(v, str) else v.id
-        data = db.load(interaction.guild.id)
-        data["config"]["canal_streamer_liveon"] = canal_id
-        db.save(interaction.guild.id, data)
+    async def _liveon(self, interaction):
+        v=interaction.data["values"][0]
+        canal_id=int(v) if isinstance(v,str) else v.id
+        data=db.load(interaction.guild.id)
+        data["config"]["canal_streamer_liveon"]=canal_id
+        db.save(interaction.guild.id,data)
         await interaction.response.send_message("Canal Live On configurado!", ephemeral=True)
 
-    @discord.ui.button(label="Desligada", style=discord.ButtonStyle.red, row=4)
-    async def toggle_med(self, interaction, button):
-        data = db.load(interaction.guild.id)
-        atual = data["config"].get("streamer_med_solo", False)
-        data["config"]["streamer_med_solo"] = not atual
-        db.save(interaction.guild.id, data)
-        status = "SIM" if not atual else "NAO"
-        await interaction.response.send_message("Streamer pode selecionar mediador: " + status, ephemeral=True)
+    @discord.ui.button(label="Desligada",style=discord.ButtonStyle.red,row=4)
+    async def toggle1(self,interaction,button):
+        data=db.load(interaction.guild.id)
+        data["config"]["streamer_med_solo"]=not data["config"].get("streamer_med_solo",False)
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Streamer selecionar mediador: "+(("SIM") if data["config"]["streamer_med_solo"] else "NAO"),ephemeral=True)
 
-    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.grey, row=4)
-    async def voltar(self, interaction, button):
-        embed = embed_central(interaction.guild)
-        await interaction.response.edit_message(embed=embed, view=ViewCentral())
-
-
-# ── CAIXAS ────────────────────────────────────────────────
+    @discord.ui.button(label="Voltar",style=discord.ButtonStyle.grey,row=4)
+    async def voltar(self,interaction,button):
+        embed=embed_central(interaction.guild)
+        await interaction.response.edit_message(embed=embed,view=ViewCentral())
 
 class ViewCaixas(discord.ui.View):
     def __init__(self):
