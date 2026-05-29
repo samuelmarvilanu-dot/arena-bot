@@ -2083,7 +2083,57 @@ class Central(commands.Cog):
         if interaction.type != discord.InteractionType.component:
             return
         cid = interaction.data.get("custom_id", "")
-        if not cid.startswith("STREAMER|"):
+        if not cid.startswith("STREAMER|") and not cid.startswith("SFILA|"):
+            return
+
+        if cid.startswith("SFILA|"):
+            partes=cid.split("|")
+            acao=partes[1] if len(partes)>1 else ""
+            uid_str=partes[2] if len(partes)>2 else None
+            if not uid_str:
+                await interaction.response.send_message("Erro.", ephemeral=True)
+                return
+            data=db.load(interaction.guild.id)
+            fila_key="sfila_"+uid_str
+            data.setdefault("filas_streamer",{})
+            fila=data["filas_streamer"].get(fila_key,[])
+            uid_jogador=interaction.user.id
+            if acao=="entrar":
+                if uid_jogador in fila:
+                    await interaction.response.send_message("Voce ja esta na fila!", ephemeral=True)
+                    return
+                fila.append(uid_jogador)
+                data["filas_streamer"][fila_key]=fila
+                db.save(interaction.guild.id,data)
+                embed=discord.Embed(title=interaction.channel.name,color=0x00FF00)
+                embed.add_field(name="Jogadores na fila:",value=chr(10).join(["<@"+str(u)+">" for u in fila]) if fila else "Nenhum jogador na fila.",inline=False)
+                await interaction.response.send_message("Voce entrou na fila! Posicao: "+str(len(fila)),ephemeral=True)
+                await interaction.message.edit(embed=embed)
+            elif acao=="chamar":
+                if str(uid_jogador)!=uid_str:
+                    await interaction.response.send_message("Apenas o streamer pode chamar!", ephemeral=True)
+                    return
+                if not fila:
+                    await interaction.response.send_message("Fila vazia!", ephemeral=True)
+                    return
+                proximo=fila.pop(0)
+                data["filas_streamer"][fila_key]=fila
+                db.save(interaction.guild.id,data)
+                embed=discord.Embed(title=interaction.channel.name,color=0x00FF00)
+                embed.add_field(name="Jogadores na fila:",value=chr(10).join(["<@"+str(u)+">" for u in fila]) if fila else "Nenhum jogador na fila.",inline=False)
+                await interaction.response.send_message("<@"+str(proximo)+"> e o proximo! Prepare-se para jogar!",ephemeral=False)
+                await interaction.message.edit(embed=embed)
+            elif acao=="sair":
+                if uid_jogador not in fila:
+                    await interaction.response.send_message("Voce nao esta na fila!",ephemeral=True)
+                    return
+                fila.remove(uid_jogador)
+                data["filas_streamer"][fila_key]=fila
+                db.save(interaction.guild.id,data)
+                embed=discord.Embed(title=interaction.channel.name,color=0x00FF00)
+                embed.add_field(name="Jogadores na fila:",value=chr(10).join(["<@"+str(u)+">" for u in fila]) if fila else "Nenhum jogador na fila.",inline=False)
+                await interaction.response.send_message("Voce saiu da fila!",ephemeral=True)
+                await interaction.message.edit(embed=embed)
             return
         if interaction.response.is_done():
             return
@@ -2185,7 +2235,7 @@ async def _atualizar_streamer(interaction, uid, data=None):
     embed.add_field(name="Nome do Canal", value=streamer.get("nome_canal", "#contra - [[nome_streamer]]"), inline=False)
     embed.add_field(name="Link da Live", value=streamer.get("link", "Nenhum"), inline=False)
     embed.add_field(name="Jogo Selecionado", value=streamer.get("jogo", "Nenhum"), inline=False)
-    view = ViewStreamerConfig(uid)
+    view = ViewStreamerConfig(uid, data)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
@@ -2230,31 +2280,51 @@ class ViewStreamerConfig(discord.ui.View):
         data["streamers"][self.uid]["ativo"]=nova_situacao
         db.save(interaction.guild.id,data)
         if nova_situacao:
-            # Ligar filas - cria canal e posta painel
             streamer=data["streamers"][self.uid]
             if not streamer.get("jogo"):
                 data["streamers"][self.uid]["ativo"]=False
                 db.save(interaction.guild.id,data)
                 await interaction.response.send_message("Selecione um jogo primeiro!", ephemeral=True)
                 return
-            cat_id=data["config"].get("streamer_categoria_id")
-            cat=interaction.guild.get_channel(cat_id) if cat_id else None
             membro=interaction.guild.get_member(int(self.uid))
-            nome_canal=streamer.get("nome_canal","contra-streamer").replace("[[nome_streamer]]",membro.display_name if membro else "streamer")
-            try:
-                canal_fila=await interaction.guild.create_text_channel(nome_canal,category=cat)
-                embed=discord.Embed(title=nome_canal,color=0x00FF00)
-                embed.add_field(name="Jogadores na fila:",value="Nenhum jogador na fila.",inline=False)
-                vf=discord.ui.View(timeout=None)
-                vf.add_item(discord.ui.Button(label="Entrar Na Fila",style=discord.ButtonStyle.green,custom_id="SFILA|entrar|"+self.uid))
-                vf.add_item(discord.ui.Button(label="Sair da Fila",style=discord.ButtonStyle.grey,custom_id="SFILA|sair|"+self.uid))
-                await canal_fila.send(embed=embed,view=vf)
-                await interaction.response.send_message("Filas LIGADAS! Canal criado: "+canal_fila.mention, ephemeral=True)
-            except Exception as e:
-                await interaction.response.send_message("Erro ao criar canal: "+str(e), ephemeral=True)
-        else:
-            await interaction.response.send_message("Filas DESLIGADAS!", ephemeral=True)
+            nome_exibir=membro.display_name if membro else "streamer"
+            regras=streamer.get("regras","Sem regras definidas.")
 
+            # Verifica se canal ja existe
+            canal_id=streamer.get("canal_fila_id")
+            canal=interaction.guild.get_channel(canal_id) if canal_id else None
+
+            if canal:
+                # Atualiza embed existente
+                embed=discord.Embed(title="Contra "+nome_exibir,description=regras,color=0x00FF00)
+                fila_key="sfila_"+self.uid
+                fila=data.get("filas_streamer",{}).get(fila_key,[])
+                embed.add_field(name="Jogadores na fila:",value=chr(10).join(["<@"+str(u)+">" for u in fila]) if fila else "Nenhum jogador na fila.",inline=False)
+                async for msg in canal.history(limit=10):
+                    if msg.author==interaction.guild.me and msg.embeds:
+                        await msg.edit(embed=embed)
+                        break
+                await interaction.response.send_message("Filas LIGADAS! Canal: "+canal.mention, ephemeral=True)
+            else:
+                # Cria canal novo
+                cat_id=data["config"].get("streamer_categoria_id")
+                cat=interaction.guild.get_channel(cat_id) if cat_id else None
+                nome_canal=streamer.get("nome_canal","contra-streamer").replace("[[nome_streamer]]",nome_exibir)
+                try:
+                    canal=await interaction.guild.create_text_channel(nome_canal,category=cat)
+                    data["streamers"][self.uid]["canal_fila_id"]=canal.id
+                    db.save(interaction.guild.id,data)
+                    embed=discord.Embed(title="Contra "+nome_exibir,description=regras,color=0x00FF00)
+                    embed.add_field(name="Jogadores na fila:",value="Nenhum jogador na fila.",inline=False)
+                    vf=discord.ui.View(timeout=None)
+                    vf.add_item(discord.ui.Button(label="Entrar Na Fila",style=discord.ButtonStyle.green,custom_id="SFILA|entrar|"+self.uid))
+                    vf.add_item(discord.ui.Button(label="Sair da Fila",style=discord.ButtonStyle.grey,custom_id="SFILA|sair|"+self.uid))
+                    vf.add_item(discord.ui.Button(label="Chamar Proximo",style=discord.ButtonStyle.blurple,custom_id="SFILA|chamar|"+self.uid,row=1))
+                    await canal.send(embed=embed,view=vf)
+                    await interaction.response.send_message("Filas LIGADAS! Canal criado: "+canal.mention, ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message("Erro: "+str(e), ephemeral=True)
+                    return
     @discord.ui.button(label="Modo Stream: Basico", style=discord.ButtonStyle.grey, row=4)
     async def modo(self, interaction, button):
         data=db.load(interaction.guild.id)
