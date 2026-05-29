@@ -2119,10 +2119,17 @@ class Central(commands.Cog):
                 proximo=fila.pop(0)
                 data["filas_streamer"][fila_key]=fila
                 db.save(interaction.guild.id,data)
+                # Atualiza embed da fila
                 embed=discord.Embed(title=interaction.channel.name,color=0x00FF00)
                 embed.add_field(name="Jogadores na fila:",value=chr(10).join(["<@"+str(u)+">" for u in fila]) if fila else "Nenhum jogador na fila.",inline=False)
-                await interaction.response.send_message("<@"+str(proximo)+"> e o proximo! Prepare-se para jogar!",ephemeral=False)
                 await interaction.message.edit(embed=embed)
+                # Cria canal de partida entre streamer e jogador
+                streamer_info=data.get("streamers",{}).get(uid_str,{})
+                jogo_id=streamer_info.get("jogo","")
+                from cogs.filas import criar_canal_partida
+                await interaction.response.send_message("<@"+str(proximo)+"> foi chamado! Criando partida...",ephemeral=False)
+                valor=streamer_info.get("valor",0.0)
+                await criar_canal_partida(interaction.guild, jogo_id, "1x1", valor, int(uid_str), proximo)
             elif acao=="sair":
                 if uid_jogador not in fila:
                     await interaction.response.send_message("Voce nao esta na fila!",ephemeral=True)
@@ -2210,6 +2217,23 @@ class ModalStreamerNome(discord.ui.Modal, title="Editar Nome do Canal"):
         db.save(interaction.guild.id, data)
         await interaction.response.send_message("Nome atualizado!", ephemeral=True)
 
+class ModalStreamerValor(discord.ui.Modal, title="Editar Valor da Fila"):
+    valor = discord.ui.TextInput(label="Valor da partida (R$)", placeholder="ex: 5.00", max_length=10)
+    def __init__(self, uid):
+        super().__init__()
+        self.uid = uid
+    async def on_submit(self, interaction):
+        try:
+            v=float(self.valor.value.replace(",","."))
+        except ValueError:
+            await interaction.response.send_message("Valor invalido!", ephemeral=True)
+            return
+        data=db.load(interaction.guild.id)
+        data.setdefault("streamers",{}).setdefault(self.uid,{})["valor"]=v
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Valor da fila: R$ "+str(round(v,2)), ephemeral=True)
+
+
 class ModalStreamerLink(discord.ui.Modal, title="Editar Link da Live"):
     link = discord.ui.TextInput(label="Link da Live", placeholder="ex: twitch.tv/seucanal", max_length=100)
     def __init__(self, uid):
@@ -2234,6 +2258,7 @@ async def _atualizar_streamer(interaction, uid, data=None):
     embed.add_field(name="Sua Descricao/Regras", value=streamer.get("regras", "Nao definido."), inline=False)
     embed.add_field(name="Nome do Canal", value=streamer.get("nome_canal", "#contra - [[nome_streamer]]"), inline=False)
     embed.add_field(name="Link da Live", value=streamer.get("link", "Nenhum"), inline=False)
+    embed.add_field(name="Valor da Fila", value="R$ "+str(round(streamer.get("valor",0.0),2)), inline=True)
     embed.add_field(name="Jogo Selecionado", value=streamer.get("jogo", "Nenhum"), inline=False)
     view = ViewStreamerConfig(uid, data)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -2270,6 +2295,10 @@ class ViewStreamerConfig(discord.ui.View):
     @discord.ui.button(label="Editar Link", style=discord.ButtonStyle.grey, row=2)
     async def link(self, interaction, button):
         await interaction.response.send_modal(ModalStreamerLink(self.uid))
+
+    @discord.ui.button(label="Editar Valor", style=discord.ButtonStyle.grey, row=2)
+    async def valor(self, interaction, button):
+        await interaction.response.send_modal(ModalStreamerValor(self.uid))
 
     @discord.ui.button(label="Filas: Desligadas", style=discord.ButtonStyle.grey, row=3)
     async def filas(self, interaction, button):
