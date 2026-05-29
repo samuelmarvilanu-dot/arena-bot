@@ -1776,26 +1776,17 @@ class ViewStreamers(discord.ui.View):
         db.save(interaction.guild.id,data)
         canal=interaction.guild.get_channel(canal_id)
         if canal:
-            embed1=discord.Embed(title="Painel do Streamer",description="Bem-vindo(a) ao painel do Streamer.\nAqui voce pode configurar tudo o que precisa para suas lives.",color=0x5865F2)
-            embed2=discord.Embed(title="Streamer - "+interaction.guild.name,description="Configura tudo pelo painel abaixo.",color=0x5865F2)
-            embed2.add_field(name="Sua Descricao/Regras",value="Nao definido.",inline=False)
-            embed2.add_field(name="Nome do Canal",value="#contra - [[nome_streamer]]",inline=False)
-            embed2.add_field(name="Link da Live",value="Nenhum",inline=False)
-            embed2.add_field(name="Jogo Selecionado",value="Nenhum",inline=False)
-            v1=discord.ui.View(timeout=None)
-            v1.add_item(discord.ui.Button(label="Configurar",style=discord.ButtonStyle.grey,custom_id="STREAMER|configurar"))
-            v2=discord.ui.View(timeout=None)
-            v2.add_item(discord.ui.Button(label="Editar Regras",style=discord.ButtonStyle.grey,custom_id="STREAMER|regras",row=0))
-            v2.add_item(discord.ui.Button(label="Editar Nome",style=discord.ButtonStyle.grey,custom_id="STREAMER|nome",row=0))
-            v2.add_item(discord.ui.Button(label="Editar Link",style=discord.ButtonStyle.grey,custom_id="STREAMER|link",row=1))
-            v2.add_item(discord.ui.Button(label="Filas: Desligadas",style=discord.ButtonStyle.grey,custom_id="STREAMER|filas",row=2))
-            v2.add_item(discord.ui.Button(label="Modo Stream: Basico",style=discord.ButtonStyle.grey,custom_id="STREAMER|modo",row=2))
-            await canal.send(embed=embed1,view=v1)
-            await canal.send(embed=embed2,view=v2)
-            await interaction.response.send_message("Canal do painel configurado e painel postado!", ephemeral=True)
+            embed=discord.Embed(
+                title="Painel do Streamer",
+                description="Bem-vindo(a) ao painel do Streamer.\nClique em Configurar para gerenciar sua fila.",
+                color=0x5865F2
+            )
+            view=discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(label="Configurar",style=discord.ButtonStyle.grey,custom_id="STREAMER|configurar"))
+            await canal.send(embed=embed,view=view)
+            await interaction.response.send_message("Painel postado em "+canal.mention+"!", ephemeral=True)
         else:
             await interaction.response.send_message("Canal nao encontrado.", ephemeral=True)
-
     async def _liveon(self, interaction):
         v=interaction.data["values"][0]
         canal_id=int(v) if isinstance(v,str) else v.id
@@ -1810,6 +1801,14 @@ class ViewStreamers(discord.ui.View):
         data["config"]["streamer_med_solo"]=not data["config"].get("streamer_med_solo",False)
         db.save(interaction.guild.id,data)
         await interaction.response.send_message("Streamer selecionar mediador: "+(("SIM") if data["config"]["streamer_med_solo"] else "NAO"),ephemeral=True)
+
+    @discord.ui.button(label="Desligada",style=discord.ButtonStyle.red,row=4)
+    async def toggle_fila(self,interaction,button):
+        data=db.load(interaction.guild.id)
+        atual=data["config"].get("streamer_fila_sep",False)
+        data["config"]["streamer_fila_sep"]=not atual
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Fila separada: "+("LIGADA" if not atual else "DESLIGADA"),ephemeral=True)
 
     @discord.ui.button(label="Voltar",style=discord.ButtonStyle.grey,row=4)
     async def voltar(self,interaction,button):
@@ -2086,21 +2085,15 @@ class Central(commands.Cog):
         cid = interaction.data.get("custom_id", "")
         if not cid.startswith("STREAMER|"):
             return
+        if interaction.response.is_done():
+            return
         acao = cid.split("|")[1]
         data = db.load(interaction.guild.id)
         uid = str(interaction.user.id)
-        if "streamers" not in data: data["streamers"] = {}
-        if uid not in data["streamers"]: data["streamers"][uid] = {}
+        data.setdefault("streamers", {}).setdefault(uid, {})
 
         if acao == "configurar":
-            streamer = data["streamers"].get(uid, {})
-            embed = discord.Embed(title="Streamer - " + interaction.user.display_name, color=0x5865F2)
-            embed.description = "Fila: " + ("LIGADA" if streamer.get("ativo") else "DESLIGADA")
-            embed.add_field(name="Sua Descricao/Regras", value=streamer.get("regras", "Nao definido."), inline=False)
-            embed.add_field(name="Nome do Canal", value=streamer.get("nome_canal", "#contra - [[nome_streamer]]"), inline=False)
-            embed.add_field(name="Link da Live", value=streamer.get("link", "Nenhum"), inline=False)
-            embed.add_field(name="Jogo Selecionado", value=streamer.get("jogo", "Nenhum"), inline=False)
-            await interaction.response.send_message(embed=embed, view=ViewStreamerConfig(uid), ephemeral=True)
+            await _atualizar_streamer(interaction, uid, data)
         elif acao == "regras":
             await interaction.response.send_modal(ModalStreamerRegras(uid))
         elif acao == "nome":
@@ -2180,44 +2173,100 @@ class ModalStreamerLink(discord.ui.Modal, title="Editar Link da Live"):
         db.save(interaction.guild.id, data)
         await interaction.response.send_message("Link atualizado!", ephemeral=True)
 
+async def _atualizar_streamer(interaction, uid, data=None):
+    if data is None:
+        data = db.load(interaction.guild.id)
+    streamer = data.get("streamers", {}).get(uid, {})
+    membro = interaction.guild.get_member(int(uid))
+    nome = membro.display_name if membro else uid
+    embed = discord.Embed(title="Streamer - " + nome, color=0x5865F2)
+    embed.description = "Status: " + ("Pronto" if streamer.get("jogo") else "Faltam configuracoes")
+    embed.add_field(name="Sua Descricao/Regras", value=streamer.get("regras", "Nao definido."), inline=False)
+    embed.add_field(name="Nome do Canal", value=streamer.get("nome_canal", "#contra - [[nome_streamer]]"), inline=False)
+    embed.add_field(name="Link da Live", value=streamer.get("link", "Nenhum"), inline=False)
+    embed.add_field(name="Jogo Selecionado", value=streamer.get("jogo", "Nenhum"), inline=False)
+    view = ViewStreamerConfig(uid)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
 class ViewStreamerConfig(discord.ui.View):
-    def __init__(self, uid):
+    def __init__(self, uid, data=None):
         super().__init__(timeout=300)
         self.uid = uid
+        # Select de jogos na row 0
+        if data:
+            filas = data.get("filas", {})
+            if filas:
+                opcoes=[discord.SelectOption(label=j["nome"],value=jid) for jid,j in list(filas.items())[:25]]
+                sel=discord.ui.Select(placeholder="Selecione UM Jogo.",options=opcoes,row=0)
+                sel.callback=self._sel_jogo
+                self.add_item(sel)
 
-    @discord.ui.button(label="Editar Regras", style=discord.ButtonStyle.grey, row=0)
+    async def _sel_jogo(self, interaction):
+        jogo_id=interaction.data["values"][0]
+        data=db.load(interaction.guild.id)
+        data.setdefault("streamers",{}).setdefault(self.uid,{})["jogo"]=jogo_id
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Jogo selecionado!", ephemeral=True)
+
+    @discord.ui.button(label="Editar Regras", style=discord.ButtonStyle.grey, row=1)
     async def regras(self, interaction, button):
         await interaction.response.send_modal(ModalStreamerRegras(self.uid))
 
-    @discord.ui.button(label="Editar Nome", style=discord.ButtonStyle.grey, row=0)
+    @discord.ui.button(label="Editar Nome", style=discord.ButtonStyle.grey, row=1)
     async def nome(self, interaction, button):
         await interaction.response.send_modal(ModalStreamerNome(self.uid))
 
-    @discord.ui.button(label="Editar Link", style=discord.ButtonStyle.grey, row=1)
+    @discord.ui.button(label="Editar Link", style=discord.ButtonStyle.grey, row=2)
     async def link(self, interaction, button):
         await interaction.response.send_modal(ModalStreamerLink(self.uid))
 
-    @discord.ui.button(label="Filas: Desligadas", style=discord.ButtonStyle.grey, row=2)
+    @discord.ui.button(label="Filas: Desligadas", style=discord.ButtonStyle.grey, row=3)
     async def filas(self, interaction, button):
-        data = db.load(interaction.guild.id)
-        if "streamers" not in data: data["streamers"] = {}
-        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
-        atual = data["streamers"][self.uid].get("ativo", False)
-        data["streamers"][self.uid]["ativo"] = not atual
-        db.save(interaction.guild.id, data)
-        await interaction.response.send_message("Filas: " + ("LIGADAS" if not atual else "DESLIGADAS"), ephemeral=True)
+        data=db.load(interaction.guild.id)
+        data.setdefault("streamers",{}).setdefault(self.uid,{})
+        atual=data["streamers"][self.uid].get("ativo",False)
+        nova_situacao = not atual
+        data["streamers"][self.uid]["ativo"]=nova_situacao
+        db.save(interaction.guild.id,data)
+        if nova_situacao:
+            # Ligar filas - cria canal e posta painel
+            streamer=data["streamers"][self.uid]
+            if not streamer.get("jogo"):
+                data["streamers"][self.uid]["ativo"]=False
+                db.save(interaction.guild.id,data)
+                await interaction.response.send_message("Selecione um jogo primeiro!", ephemeral=True)
+                return
+            cat_id=data["config"].get("streamer_categoria_id")
+            cat=interaction.guild.get_channel(cat_id) if cat_id else None
+            membro=interaction.guild.get_member(int(self.uid))
+            nome_canal=streamer.get("nome_canal","contra-streamer").replace("[[nome_streamer]]",membro.display_name if membro else "streamer")
+            try:
+                canal_fila=await interaction.guild.create_text_channel(nome_canal,category=cat)
+                embed=discord.Embed(title=nome_canal,color=0x00FF00)
+                embed.add_field(name="Jogadores na fila:",value="Nenhum jogador na fila.",inline=False)
+                vf=discord.ui.View(timeout=None)
+                vf.add_item(discord.ui.Button(label="Entrar Na Fila",style=discord.ButtonStyle.green,custom_id="SFILA|entrar|"+self.uid))
+                vf.add_item(discord.ui.Button(label="Sair da Fila",style=discord.ButtonStyle.grey,custom_id="SFILA|sair|"+self.uid))
+                await canal_fila.send(embed=embed,view=vf)
+                await interaction.response.send_message("Filas LIGADAS! Canal criado: "+canal_fila.mention, ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message("Erro ao criar canal: "+str(e), ephemeral=True)
+        else:
+            await interaction.response.send_message("Filas DESLIGADAS!", ephemeral=True)
 
-    @discord.ui.button(label="Modo Stream: Basico", style=discord.ButtonStyle.grey, row=2)
+    @discord.ui.button(label="Modo Stream: Basico", style=discord.ButtonStyle.grey, row=4)
     async def modo(self, interaction, button):
-        data = db.load(interaction.guild.id)
-        if "streamers" not in data: data["streamers"] = {}
-        if self.uid not in data["streamers"]: data["streamers"][self.uid] = {}
-        modos = ["Basico", "Avancado"]
-        atual = data["streamers"][self.uid].get("modo", "Basico")
-        novo = modos[(modos.index(atual)+1) % len(modos)] if atual in modos else "Basico"
-        data["streamers"][self.uid]["modo"] = novo
-        db.save(interaction.guild.id, data)
-        await interaction.response.send_message("Modo: " + novo, ephemeral=True)
+        data=db.load(interaction.guild.id)
+        data.setdefault("streamers",{}).setdefault(self.uid,{})
+        modos=["Basico","Avancado"]
+        atual=data["streamers"][self.uid].get("modo","Basico")
+        novo=modos[(modos.index(atual)+1)%len(modos)] if atual in modos else "Basico"
+        data["streamers"][self.uid]["modo"]=novo
+        db.save(interaction.guild.id,data)
+        await interaction.response.send_message("Modo Stream: "+novo, ephemeral=True)
+
+
 
 
 async def setup(bot):
