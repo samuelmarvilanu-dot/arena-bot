@@ -485,26 +485,34 @@ class ViewInscricao(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
         try:
-            overwrites = {
-                interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            }
+            # Cria thread privada dentro do canal do campeonato
+            canal_camp = interaction.guild.get_channel(camp.get("canal_id"))
+            if not canal_camp:
+                await interaction.followup.send("❌ Canal do campeonato não encontrado.", ephemeral=True)
+                return
+
+            nome_thread = "pag-" + interaction.user.display_name[:20]
+            thread = await canal_camp.create_thread(
+                name=nome_thread,
+                type=discord.ChannelType.private_thread,
+                invitable=False
+            )
+            # Adiciona o jogador e admins na thread
+            await thread.add_user(interaction.user)
             cargo_adm_id = data["config"].get("cargo_mediador")
             if cargo_adm_id:
                 cargo_adm = interaction.guild.get_role(cargo_adm_id)
                 if cargo_adm:
-                    overwrites[cargo_adm] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-            nome_canal = "pag-" + interaction.user.display_name.lower().replace(" ", "-")[:20]
-            cat = None
-            canal_camp = interaction.guild.get_channel(camp.get("canal_id"))
-            if canal_camp and canal_camp.category:
-                cat = canal_camp.category
-
-            canal_pag = await interaction.guild.create_text_channel(nome_canal, overwrites=overwrites, category=cat)
+                    for m in interaction.guild.members:
+                        if cargo_adm in m.roles and not m.bot:
+                            try:
+                                await thread.add_user(m)
+                            except Exception:
+                                pass
 
             camp.setdefault("pendentes", {})[uid] = {
-                "canal_id": canal_pag.id,
+                "canal_id": thread.id,
+                "thread": True,
                 "iniciado_em": datetime.now().isoformat(),
                 "prazo": (datetime.now() + timedelta(hours=camp.get("prazo_horas", 24))).isoformat()
             }
@@ -529,15 +537,15 @@ class ViewInscricao(discord.ui.View):
                 embed.set_thumbnail(url=interaction.guild.icon.url)
 
             qr_file = gerar_qrcode_pix(camp.get("pix", ""))
-            view_pag = ViewPagamento(self.camp_id, uid, canal_pag.id)
+            view_pag = ViewPagamento(self.camp_id, uid, thread.id)
 
             if qr_file:
-                await canal_pag.send(embed=embed, file=qr_file, view=view_pag)
+                await thread.send(embed=embed, file=qr_file, view=view_pag)
             else:
-                await canal_pag.send(embed=embed, view=view_pag)
+                await thread.send(embed=embed, view=view_pag)
 
             await interaction.followup.send(
-                "✅ Canal criado! Acesse " + canal_pag.mention + " para pagar.",
+                "✅ Tópico criado! Acesse " + thread.mention + " para pagar.",
                 ephemeral=True
             )
         except Exception as e:
@@ -563,6 +571,13 @@ class ViewInscricao(discord.ui.View):
                     await canal_pag.delete()
                 except Exception:
                     pass
+            else:
+                thread_pag = interaction.guild.get_thread(info["canal_id"])
+                if thread_pag:
+                    try:
+                        await thread_pag.delete()
+                    except Exception:
+                        pass
             del camp["pendentes"][uid]
             removido = True
         elif uid in camp.get("lista_espera", []):
@@ -663,9 +678,12 @@ class ViewPagamento(discord.ui.View):
 
         await asyncio.sleep(30)
         try:
-            canal = interaction.guild.get_channel(self.canal_id)
-            if canal:
-                await canal.delete()
+            # Tenta deletar thread ou canal
+            obj = interaction.guild.get_channel(self.canal_id)
+            if not obj:
+                obj = interaction.guild.get_thread(self.canal_id)
+            if obj:
+                await obj.delete()
         except Exception:
             pass
 
@@ -981,16 +999,23 @@ class Campeonato(commands.Cog):
 
         # Canal de pagamento privado
         if acao in ("confirmar_pag", "rejeitar_pag"):
+            canal_id = interaction.channel.id
+            found = False
             for camp_id, camp in data.get("campeonatos", {}).items():
                 for uid, pend in camp.get("pendentes", {}).items():
-                    if pend.get("canal_id") == interaction.channel.id:
-                        view = ViewPagamento(camp_id, uid, interaction.channel.id)
+                    if pend.get("canal_id") == canal_id:
+                        view = ViewPagamento(camp_id, uid, canal_id)
                         if acao == "confirmar_pag":
-                            await view.confirmar.callback(view, interaction, None)
+                            await view.confirmar.callback(view, interaction, view.confirmar)
                         else:
-                            await view.rejeitar.callback(view, interaction, None)
+                            await view.rejeitar.callback(view, interaction, view.rejeitar)
+                        found = True
                         return
-            await interaction.response.send_message("❌ Canal não encontrado.", ephemeral=True)
+            if not found:
+                await interaction.response.send_message(
+                    "Pendente nao encontrado para este topico. ID: " + str(canal_id),
+                    ephemeral=True
+                )
             return
 
         # Encontra campeonato pelo canal
